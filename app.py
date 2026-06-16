@@ -8,9 +8,11 @@ Phase 1 MVP:
 - Raw click log viewer
 """
 import json
+import os
 import secrets
 from flask import Flask, render_template, request, redirect, url_for, abort, flash
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import db
 from utils import (
@@ -23,11 +25,26 @@ from utils import (
 )
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
+
+# Secret key: env var > persistent file > generate new
+# (persistent so sessions survive restarts)
+_secret_path = Path(__file__).parent / ".secret_key"
+if os.environ.get("FLASK_SECRET"):
+    app.secret_key = os.environ["FLASK_SECRET"]
+elif _secret_path.exists():
+    app.secret_key = _secret_path.read_text().strip()
+else:
+    _new_secret = secrets.token_hex(32)
+    _secret_path.write_text(_new_secret)
+    os.chmod(_secret_path, 0o600)
+    app.secret_key = _new_secret
 
 # Disable all caching so template changes show up immediately
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 app.config['TEMPLATES_AUTO_RELOAD'] = True
+
+# Debug: only True in dev (no FLASK_ENV=production)
+app.config['DEBUG'] = os.environ.get("FLASK_DEBUG", "0") == "1"
 
 @app.after_request
 def add_no_cache_headers(response):
@@ -91,12 +108,14 @@ def index():
 
 @app.route("/new", methods=["GET", "POST"])
 def new_link():
+    domains = db.list_domains()
+    primary = db.get_primary_domain()
     if request.method == "POST":
         try:
             data = _parse_form()
         except ValueError as e:
             flash(str(e), "error")
-            return render_template("new.html", form=request.form)
+            return render_template("new.html", form=request.form, domains=domains)
 
         # Auto-generate short_code if empty
         if not data["short_code"]:
@@ -107,18 +126,22 @@ def new_link():
                     break
             else:
                 flash("Failed to generate unique code, try again", "error")
-                return render_template("new.html", form=request.form)
+                return render_template("new.html", form=request.form, domains=domains)
 
         # Check uniqueness
         if db.get_link_by_code(data["short_code"]):
             flash(f"Short code '{data['short_code']}' already exists", "error")
-            return render_template("new.html", form=request.form)
+            return render_template("new.html", form=request.form, domains=domains)
 
         link_id = db.create_link(data)
         flash(f"Created link /r/{data['short_code']}", "success")
         return redirect(url_for("view_clicks", link_id=link_id))
 
-    return render_template("new.html", form={})
+    # Pre-fill domain_id with primary for new link form
+    initial_form = {}
+    if primary:
+        initial_form["domain_id"] = str(primary["id"])
+    return render_template("new.html", form=initial_form, domains=domains)
 
 
 @app.route("/<int:link_id>/edit", methods=["GET", "POST"])
@@ -126,19 +149,20 @@ def edit_link(link_id):
     link = db.get_link_by_id(link_id)
     if not link:
         abort(404)
+    domains = db.list_domains()
 
     if request.method == "POST":
         try:
             data = _parse_form()
         except ValueError as e:
             flash(str(e), "error")
-            return render_template("edit.html", link=link, form=request.form)
+            return render_template("new.html", link=link, form=request.form, domains=domains)
 
         # Check short_code uniqueness if changed
         if data["short_code"] != link["short_code"]:
             if db.get_link_by_code(data["short_code"]):
                 flash(f"Short code '{data['short_code']}' already exists", "error")
-                return render_template("edit.html", link=link, form=request.form)
+                return render_template("new.html", link=link, form=request.form, domains=domains)
 
         db.update_link(link_id, data)
         flash("Link updated", "success")
@@ -160,8 +184,9 @@ def edit_link(link_id):
         "expires_at": link["expires_at"] or "",
         "max_clicks": link["max_clicks"] or "",
         "is_active": "1" if link["is_active"] else "",
+        "domain_id": str(link["domain_id"]) if link["domain_id"] else "",
     }
-    return render_template("new.html", link=link, form=form)
+    return render_template("new.html", link=link, form=form, domains=domains)
 
 
 @app.route("/<int:link_id>/delete", methods=["POST"])
@@ -169,6 +194,70 @@ def delete_link(link_id):
     db.delete_link(link_id)
     flash("Link deleted", "success")
     return redirect(url_for("index"))
+
+
+# --- Domain management ---
+
+@app.route("/domains", methods=["GET"])
+def domains_page():
+    domains = db.list_domains()
+    return render_template("domains.html", domains=domains)
+
+
+@app.route("/domains", methods=["POST"])
+def create_domain_route():
+    hostname = (request.form.get("hostname") or "").strip().lower()
+    notes = (request.form.get("notes") or "").strip() or None
+    is_primary = bool(request.form.get("is_primary"))
+    ssl_enabled = bool(request.form.get("ssl_enabled"))
+
+    if not hostname:
+        flash("Hostname is required", "error")
+        return redirect(url_for("domains_page"))
+    if db.get_domain_by_hostname(hostname):
+        flash(f"Domain '{hostname}' already exists", "error")
+        return redirect(url_for("domains_page"))
+
+    domain_id = db.create_domain(hostname, is_primary=is_primary, notes=notes, ssl_enabled=ssl_enabled)
+    flash(f"Added domain {hostname}", "success")
+    return redirect(url_for("domains_page"))
+
+
+@app.route("/domains/<int:domain_id>/primary", methods=["POST"])
+def set_primary_domain_route(domain_id):
+    if not db.get_domain(domain_id):
+        flash("Domain not found", "error")
+    else:
+        db.set_primary_domain(domain_id)
+        flash("Primary domain updated", "success")
+    return redirect(url_for("domains_page"))
+
+
+@app.route("/domains/<int:domain_id>/ssl", methods=["POST"])
+def toggle_ssl_route(domain_id):
+    domain = db.get_domain(domain_id)
+    if not domain:
+        flash("Domain not found", "error")
+    else:
+        new_val = not domain["ssl_enabled"]
+        db.update_domain(domain_id, ssl_enabled=new_val)
+        flash(f"SSL {'enabled' if new_val else 'disabled'} for {domain['hostname']}", "success")
+    return redirect(url_for("domains_page"))
+
+
+@app.route("/domains/<int:domain_id>/delete", methods=["POST"])
+def delete_domain_route(domain_id):
+    domain = db.get_domain(domain_id)
+    if not domain:
+        flash("Domain not found", "error")
+        return redirect(url_for("domains_page"))
+    link_count = db.count_links_for_domain(domain_id)
+    if link_count > 0:
+        flash(f"Cannot delete: {link_count} link(s) still use this domain. Reassign or delete them first.", "error")
+        return redirect(url_for("domains_page"))
+    db.delete_domain(domain_id)
+    flash(f"Deleted {domain['hostname']}", "success")
+    return redirect(url_for("domains_page"))
 
 
 @app.route("/<int:link_id>/stats")
@@ -244,6 +333,21 @@ def redirect_short(code):
     if link["max_clicks"]:
         if db.get_click_count(link["id"]) >= link["max_clicks"]:
             abort(410, "Link max clicks reached")
+
+    # Domain validation
+    domain = None
+    if link["domain_id"]:
+        domain = db.get_domain(link["domain_id"])
+    if not domain or not domain["is_active"]:
+        abort(404, "Domain not configured or disabled")
+
+    # Validate request host matches the link's domain
+    request_host = request.host.split(":")[0]  # strip port
+    force_id = request.args.get("force_domain")
+    if request_host != domain["hostname"]:
+        # Allow dev override via ?force_domain=<id> matching the link's domain
+        if not (force_id and str(domain["id"]) == str(force_id)):
+            abort(404, f"Link not registered for {request.host}")
 
     # Source detection
     referer = request.headers.get("Referer", "")
@@ -322,6 +426,28 @@ def _parse_form():
 
     data["is_active"] = bool(request.form.get("is_active"))
 
+    # Domain selection
+    domain_id_raw = request.form.get("domain_id", "").strip()
+    if domain_id_raw:
+        try:
+            domain_id = int(domain_id_raw)
+            domain = db.get_domain(domain_id)
+            if not domain:
+                raise ValueError(f"Domain id {domain_id} not found")
+            if not domain["is_active"]:
+                raise ValueError(f"Domain {domain['hostname']} is disabled")
+            data["domain_id"] = domain_id
+        except ValueError as e:
+            if "invalid literal" in str(e):
+                raise ValueError("Invalid domain selection")
+            raise
+    else:
+        # No domain selected - fall back to primary
+        primary = db.get_primary_domain()
+        if not primary:
+            raise ValueError("No domain selected and no primary domain configured. Add a domain in /domains first.")
+        data["domain_id"] = primary["id"]
+
     # Destinations (A/B variants) - parse from JSON textarea
     dest_raw = (request.form.get("destinations") or "").strip()
     data["destinations"] = None
@@ -363,4 +489,7 @@ def gone(e):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5071, debug=True)
+    debug = app.config.get("DEBUG", False)
+    host = os.environ.get("FLASK_HOST", "0.0.0.0")
+    port = int(os.environ.get("FLASK_PORT", "5071"))
+    app.run(host=host, port=port, debug=debug)

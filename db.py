@@ -1,12 +1,25 @@
 """Database helpers and schema for ShortLink."""
+import os
 import sqlite3
 import json
 from contextlib import contextmanager
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "shortlink.db"
+# DB path: overridable via SHORTLINK_DB env var, default next to this file
+_default_db = Path(__file__).parent / "shortlink.db"
+DB_PATH = Path(os.environ.get("SHORTLINK_DB", str(_default_db)))
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS domains (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hostname TEXT UNIQUE NOT NULL,
+    is_primary INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    ssl_enabled INTEGER NOT NULL DEFAULT 0,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS links (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     short_code TEXT UNIQUE NOT NULL,
@@ -23,6 +36,7 @@ CREATE TABLE IF NOT EXISTS links (
     expires_at TEXT,
     max_clicks INTEGER,
     is_active INTEGER NOT NULL DEFAULT 1,
+    domain_id INTEGER REFERENCES domains(id) ON DELETE RESTRICT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -60,7 +74,15 @@ def get_db():
 
 def init_db():
     with get_db() as conn:
+        # Migration first: add domain_id to existing links tables
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(links)").fetchall()]
+        if "domain_id" not in cols:
+            conn.execute("ALTER TABLE links ADD COLUMN domain_id INTEGER REFERENCES domains(id) ON DELETE RESTRICT")
+        # Now run full schema (safe — IF NOT EXISTS handles everything)
         conn.executescript(SCHEMA)
+        # Indexes (created after migration so domain_id column is guaranteed)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_links_domain ON links(domain_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_hostname ON domains(hostname)")
 
 
 def get_link_by_id(link_id):
@@ -77,18 +99,20 @@ def list_links(limit=None, offset=0):
     with get_db() as conn:
         if limit is not None:
             rows = conn.execute("""
-                SELECT l.*, COUNT(c.id) as click_count
+                SELECT l.*, COUNT(c.id) as click_count, d.hostname, d.ssl_enabled
                 FROM links l
                 LEFT JOIN clicks c ON c.link_id = l.id
+                LEFT JOIN domains d ON d.id = l.domain_id
                 GROUP BY l.id
                 ORDER BY l.created_at DESC
                 LIMIT ? OFFSET ?
             """, (limit, offset)).fetchall()
         else:
             rows = conn.execute("""
-                SELECT l.*, COUNT(c.id) as click_count
+                SELECT l.*, COUNT(c.id) as click_count, d.hostname, d.ssl_enabled
                 FROM links l
                 LEFT JOIN clicks c ON c.link_id = l.id
+                LEFT JOIN domains d ON d.id = l.domain_id
                 GROUP BY l.id
                 ORDER BY l.created_at DESC
             """).fetchall()
@@ -108,8 +132,8 @@ def create_link(data):
                 short_code, title, strategy, default_destination, destinations_json,
                 utm_source, utm_medium, utm_campaign, utm_content,
                 query_param_key, query_param_value,
-                expires_at, max_clicks
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                expires_at, max_clicks, domain_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["short_code"],
             data.get("title"),
@@ -124,6 +148,7 @@ def create_link(data):
             data.get("query_param_value"),
             data.get("expires_at"),
             data.get("max_clicks"),
+            data.get("domain_id"),
         ))
         return cur.lastrowid
 
@@ -136,7 +161,7 @@ def update_link(link_id, data):
                 destinations_json = ?,
                 utm_source = ?, utm_medium = ?, utm_campaign = ?, utm_content = ?,
                 query_param_key = ?, query_param_value = ?,
-                expires_at = ?, max_clicks = ?, is_active = ?
+                expires_at = ?, max_clicks = ?, is_active = ?, domain_id = ?
             WHERE id = ?
         """, (
             data["short_code"],
@@ -153,6 +178,7 @@ def update_link(link_id, data):
             data.get("expires_at"),
             data.get("max_clicks"),
             1 if data.get("is_active") else 0,
+            data.get("domain_id"),
             link_id,
         ))
 
@@ -186,6 +212,82 @@ def get_click_count(link_id):
     with get_db() as conn:
         row = conn.execute("SELECT COUNT(*) as c FROM clicks WHERE link_id = ?", (link_id,)).fetchone()
         return row["c"] if row else 0
+
+
+# --- Domains CRUD ---
+
+def list_domains():
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT d.*, COUNT(l.id) as link_count
+            FROM domains d
+            LEFT JOIN links l ON l.domain_id = d.id
+            GROUP BY d.id
+            ORDER BY d.is_primary DESC, d.created_at ASC
+        """).fetchall()
+        return rows
+
+
+def get_domain(domain_id):
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM domains WHERE id = ?", (domain_id,)).fetchone()
+
+
+def get_domain_by_hostname(hostname):
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM domains WHERE hostname = ?", (hostname,)).fetchone()
+
+
+def get_primary_domain():
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM domains WHERE is_primary = 1 LIMIT 1").fetchone()
+
+
+def create_domain(hostname, is_primary=False, notes=None, ssl_enabled=False):
+    hostname = hostname.strip().lower()
+    with get_db() as conn:
+        # If this is the first domain, force primary
+        existing = conn.execute("SELECT COUNT(*) as c FROM domains").fetchone()["c"]
+        if existing == 0:
+            is_primary = True
+
+        if is_primary:
+            # Clear other primaries first
+            conn.execute("UPDATE domains SET is_primary = 0 WHERE is_primary = 1")
+
+        cur = conn.execute("""
+            INSERT INTO domains (hostname, is_primary, notes, ssl_enabled)
+            VALUES (?, ?, ?, ?)
+        """, (hostname, 1 if is_primary else 0, notes, 1 if ssl_enabled else 0))
+        return cur.lastrowid
+
+
+def set_primary_domain(domain_id):
+    with get_db() as conn:
+        conn.execute("UPDATE domains SET is_primary = 0")
+        conn.execute("UPDATE domains SET is_primary = 1 WHERE id = ?", (domain_id,))
+
+
+def update_domain(domain_id, is_active=None, ssl_enabled=None, notes=None):
+    with get_db() as conn:
+        if is_active is not None:
+            conn.execute("UPDATE domains SET is_active = ? WHERE id = ?", (1 if is_active else 0, domain_id))
+        if ssl_enabled is not None:
+            conn.execute("UPDATE domains SET ssl_enabled = ? WHERE id = ?", (1 if ssl_enabled else 0, domain_id))
+        if notes is not None:
+            conn.execute("UPDATE domains SET notes = ? WHERE id = ?", (notes, domain_id))
+
+
+def count_links_for_domain(domain_id):
+    with get_db() as conn:
+        row = conn.execute("SELECT COUNT(*) as c FROM links WHERE domain_id = ?", (domain_id,)).fetchone()
+        return row["c"] if row else 0
+
+
+def delete_domain(domain_id):
+    """Delete a domain. Caller must verify no links reference it."""
+    with get_db() as conn:
+        conn.execute("DELETE FROM domains WHERE id = ?", (domain_id,))
 
 
 # --- Analytics aggregate queries ---

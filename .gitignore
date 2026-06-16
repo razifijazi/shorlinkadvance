@@ -13,6 +13,9 @@ env/
 *.sqlite
 *.sqlite3
 
+# Secret key (production)
+.secret_key
+
 # IDE
 .vscode/
 .idea/

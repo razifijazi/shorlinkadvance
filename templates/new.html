@@ -7,6 +7,30 @@
 
 <form method="POST" class="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
   <div>
+    <label class="block text-sm font-medium text-slate-700 mb-1">
+      Domain <span class="text-slate-400 font-normal">(where this link will be served)</span>
+    </label>
+    {% if domains %}
+    <select name="domain_id" id="domain_id" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm mono">
+      {% for d in domains %}
+        <option value="{{ d.id }}" data-hostname="{{ d.hostname }}"
+          {% if form.domain_id|string == d.id|string %}selected
+          {% elif d.is_primary and not form.domain_id %}selected{% endif %}>
+          {{ d.hostname }}{% if d.is_primary %} ⭐{% endif %}{% if d.ssl_enabled %} 🔒{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <div class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-3">
+      No domains configured. <a href="{{ url_for('domains_page') }}" class="underline font-medium">Add a domain</a> first.
+    </div>
+    {% endif %}
+    <div class="text-xs text-slate-500 mt-1">
+      Shortlink URL: <code class="mono bg-slate-100 px-1" id="shortlink-preview">—</code>
+    </div>
+  </div>
+
+  <div>
     <label class="block text-sm font-medium text-slate-700 mb-1">Title (for your reference)</label>
     <input name="title" value="{{ form.title or '' }}" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm" placeholder="e.g. Product X — New Year Campaign">
   </div>
@@ -274,5 +298,29 @@
       existing.forEach(d => addVariant(d.url, d.weight));
     }
   {% endif %}
+
+  // --- Shortlink URL preview (domain + code) ---
+  const domainSelect = document.getElementById('domain_id');
+  const shortCodeInput = document.querySelector('input[name="short_code"]');
+  const previewEl = document.getElementById('shortlink-preview');
+  function updatePreview() {
+    if (!previewEl) return;
+    if (!domainSelect) {
+      previewEl.textContent = '(add a domain first)';
+      return;
+    }
+    const opt = domainSelect.options[domainSelect.selectedIndex];
+    if (!opt) {
+      previewEl.textContent = '(select a domain)';
+      return;
+    }
+    const hostname = opt.dataset.hostname || 'domain.com';
+    const code = (shortCodeInput && shortCodeInput.value.trim()) || 'abc123';
+    const proto = hostname === 'localhost' ? 'http' : 'https';
+    previewEl.textContent = `${proto}://${hostname}/r/${code}`;
+  }
+  if (domainSelect) domainSelect.addEventListener('change', updatePreview);
+  if (shortCodeInput) shortCodeInput.addEventListener('input', updatePreview);
+  updatePreview();
 </script>
 {% endblock %}

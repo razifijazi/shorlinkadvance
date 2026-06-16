@@ -36,6 +36,7 @@
         <tr>
           <th class="px-4 py-2 font-medium">Title</th>
           <th class="px-4 py-2 font-medium">Short Code</th>
+          <th class="px-4 py-2 font-medium">Domain</th>
           <th class="px-4 py-2 font-medium">Destination</th>
           <th class="px-4 py-2 font-medium">Strategy</th>
           <th class="px-4 py-2 font-medium">Clicks</th>
@@ -53,14 +54,21 @@
           <td class="px-4 py-2 mono">
             <div class="flex items-center gap-1">
               <a href="/r/{{ l.short_code }}" target="_blank" class="text-blue-600 hover:underline">/r/{{ l.short_code }}</a>
-              <button type="button" onclick="copyShortLink('{{ l.short_code }}', this)" title="Copy link"
+              <button type="button" onclick="copyShortLink('{{ l.short_code }}', '{{ l.hostname or '' }}', '{{ 'https' if l.ssl_enabled else 'http' }}', this)" title="Copy link"
                       class="text-slate-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs">
                 📋
               </button>
             </div>
           </td>
+          <td class="px-4 py-2 text-slate-500 text-xs" title="{{ l.hostname or '(no domain)' }}">
+            {% if l.hostname %}
+              <span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 mono text-xs">{{ l.hostname[:24] }}{% if l.hostname|length > 24 %}…{% endif %}</span>
+            {% else %}
+              <span class="text-slate-400">—</span>
+            {% endif %}
+          </td>
           <td class="px-4 py-2 text-slate-600" style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ l.default_destination }}">
-            {{ l.default_destination }}
+              {{ l.default_destination }}
           </td>
           <td class="px-4 py-2 text-slate-600">{{ l.strategy }}</td>
           <td class="px-4 py-2 text-slate-800 font-medium">{{ l.click_count }}</td>
@@ -123,8 +131,15 @@
 
 {% block scripts %}
 <script>
-  function copyShortLink(code, btn) {
-    const url = window.location.origin + '/r/' + code;
+  function copyShortLink(code, hostname, proto, btn) {
+    // Use the link's bound domain (from DB), not window.location
+    let url;
+    if (hostname) {
+      url = `${proto}://${hostname}/r/${code}`;
+    } else {
+      // Fallback: link has no domain, use current origin
+      url = window.location.origin + '/r/' + code;
+    }
     const showCopied = () => {
       const orig = btn.innerHTML;
       btn.innerHTML = '✓';

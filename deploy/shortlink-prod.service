@@ -1,0 +1,23 @@
+[Unit]
+Description=ShortLink Production (gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/shortlink-prod
+Environment="SHORTLINK_DB=/home/ubuntu/shortlink-prod/shortlink-prod.db"
+Environment="FLASK_DEBUG=0"
+ExecStart=/home/ubuntu/shortlink-prod/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5071 --access-logfile /home/ubuntu/shortlink-prod/access.log --error-logfile /home/ubuntu/shortlink-prod/error.log wsgi:app
+Restart=always
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/shortlink-prod
+
+[Install]
+WantedBy=multi-user.target
