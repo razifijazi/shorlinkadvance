@@ -103,7 +103,7 @@ Or with gunicorn:
 - [ ] Password-protected links
 - [ ] CSV export of click log
 - [ ] Bulk create from CSV
-- [ ] Custom domain (e.g. `link.digitalthemeplan.my.id`)
+- [ ] Custom domain (e.g. `link.example.com`)
 
 ## License
 
