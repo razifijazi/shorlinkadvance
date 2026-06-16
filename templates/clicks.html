@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Clicks — /r/{{ link.short_code }}{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <div>
+    <a href="{{ url_for('index') }}" class="text-sm text-slate-500 hover:text-slate-700">← All Links</a>
+    <h1 class="text-2xl font-bold text-slate-800 mt-1">
+      {{ link.title or '/r/' + link.short_code }}
+    </h1>
+    <div class="mono text-sm text-blue-600 mt-1">
+      <a href="/r/{{ link.short_code }}" target="_blank">/r/{{ link.short_code }}</a>
+      →
+      <a href="{{ link.default_destination }}" target="_blank" class="text-slate-600 hover:underline">{{ link.default_destination }}</a>
+    </div>
+  </div>
+  <div class="flex items-center gap-2 text-sm">
+    <a href="{{ url_for('edit_link', link_id=link.id) }}" class="px-3 py-1.5 border border-slate-300 rounded-md hover:bg-slate-50">Edit</a>
+  </div>
+</div>
+
+{% if destinations %}
+<div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm">
+  <div class="font-medium text-amber-900 mb-1">A/B Variants Active</div>
+  <div class="space-y-1 text-amber-800 mono text-xs">
+    {% for d in destinations %}
+    <div>• {{ d.url }} <span class="text-amber-600">(weight {{ d.weight }})</span></div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+  <div class="px-4 py-2 border-b border-slate-200 bg-slate-50 text-sm font-medium text-slate-700">
+    Recent Clicks ({{ clicks|length }})
+  </div>
+  {% if clicks %}
+  <table class="w-full text-sm">
+    <thead class="bg-slate-50 text-left text-slate-600 text-xs">
+      <tr>
+        <th class="px-4 py-2 font-medium">When</th>
+        <th class="px-4 py-2 font-medium">Source</th>
+        <th class="px-4 py-2 font-medium">Device</th>
+        <th class="px-4 py-2 font-medium">Browser / OS</th>
+        <th class="px-4 py-2 font-medium">Variant Served</th>
+        <th class="px-4 py-2 font-medium">Referer</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for c in clicks %}
+      <tr class="hover:bg-slate-50">
+        <td class="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">{{ c.timestamp }}</td>
+        <td class="px-4 py-2">
+          <span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 mono">{{ c.source_label or '—' }}</span>
+        </td>
+        <td class="px-4 py-2 text-slate-600 text-xs">{{ c.device_type }}</td>
+        <td class="px-4 py-2 text-slate-600 text-xs">{{ c.browser }} / {{ c.os }}</td>
+        <td class="px-4 py-2 text-slate-600 text-xs mono truncate max-w-xs">{{ c.variant_served }}</td>
+        <td class="px-4 py-2 text-slate-500 text-xs mono truncate max-w-xs">
+          {% if c.referer_header %}{{ c.referer_header }}{% else %}—{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="px-4 py-8 text-center text-slate-500 text-sm">
+    No clicks yet. Share the link to start tracking.
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

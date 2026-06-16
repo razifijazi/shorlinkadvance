@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block title %}/r/{{ link.short_code }} — ShortLink{% endblock %}
+{% block content %}
+{% set active_tab = request.args.get('tab', 'charts') %}
+<div class="flex items-center justify-between mb-4">
+  <div>
+    <a href="{{ url_for('index') }}" class="text-sm text-slate-500 hover:text-slate-700">← All Links</a>
+    <h1 class="text-2xl font-bold text-slate-800 mt-1">
+      {{ link.title or '/r/' + link.short_code }}
+    </h1>
+    <div class="mono text-sm text-blue-600 mt-1">
+      <a href="/r/{{ link.short_code }}" target="_blank">/r/{{ link.short_code }}</a>
+      →
+      <a href="{{ link.default_destination }}" target="_blank" class="text-slate-600 hover:underline">{{ link.default_destination }}</a>
+    </div>
+  </div>
+  <div class="flex items-center gap-2 text-sm">
+    <a href="{{ url_for('edit_link', link_id=link.id) }}" class="px-3 py-1.5 border border-slate-300 rounded-md hover:bg-slate-50">Edit</a>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="border-b border-slate-200 mb-4">
+  <nav class="flex gap-1">
+    <a href="?tab=charts{% if range_label != '30d' %}&range={{ range_label }}{% endif %}"
+       class="px-4 py-2 text-sm border-b-2 -mb-px
+         {% if active_tab == 'charts' %}border-blue-600 text-blue-600 font-medium{% else %}border-transparent text-slate-500 hover:text-slate-700{% endif %}">
+      Charts
+    </a>
+    <a href="?tab=clicks{% if range_label != '30d' %}&range={{ range_label }}{% endif %}"
+       class="px-4 py-2 text-sm border-b-2 -mb-px
+         {% if active_tab == 'clicks' %}border-blue-600 text-blue-600 font-medium{% else %}border-transparent text-slate-500 hover:text-slate-700{% endif %}">
+      Raw Clicks <span class="text-xs text-slate-400 ml-1">({{ total }})</span>
+    </a>
+  </nav>
+</div>
+
+<!-- Date range filter (always visible) -->
+<div class="flex items-center gap-2 mb-4 text-sm">
+  <span class="text-slate-500">Range:</span>
+  {% for r in ['24h', '7d', '30d', 'all'] %}
+    <a href="?tab={{ active_tab }}&range={{ r }}"
+       class="px-3 py-1 rounded-md
+         {% if range_label == r %}bg-blue-600 text-white{% else %}border border-slate-300 text-slate-600 hover:bg-slate-50{% endif %}">
+      {{ r }}
+    </a>
+  {% endfor %}
+  <span class="ml-auto text-slate-500">
+    <span class="font-semibold text-slate-800 text-lg">{{ total }}</span> clicks in range
+  </span>
+</div>
+
+{% if destinations %}
+<div class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-sm">
+  <div class="font-medium text-amber-900 mb-1">A/B Variants Active</div>
+  <div class="space-y-1 text-amber-800 mono text-xs">
+    {% for d in destinations %}
+    <div>• {{ d.url }} <span class="text-amber-600">(weight {{ d.weight }})</span></div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if active_tab == 'charts' %}
+  {% if total == 0 %}
+  <div class="bg-white border border-slate-200 rounded-lg p-12 text-center text-slate-500">
+    No clicks in this range yet. Share the link to start collecting data.
+  </div>
+  {% else %}
+  <div class="bg-white border border-slate-200 rounded-lg p-4 mb-4">
+    <h2 class="text-sm font-semibold text-slate-700 mb-3">Clicks Over Time</h2>
+    <div class="h-64"><canvas id="timeChart"></canvas></div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-700 mb-3">Source</h2>
+      <div class="h-64"><canvas id="sourceChart"></canvas></div>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-700 mb-3">Device</h2>
+      <div class="h-64"><canvas id="deviceChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-700 mb-3">Browser</h2>
+      <div class="h-64"><canvas id="browserChart"></canvas></div>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-lg p-4">
+      <h2 class="text-sm font-semibold text-slate-700 mb-3">Operating System</h2>
+      <div class="h-64"><canvas id="osChart"></canvas></div>
+    </div>
+  </div>
+
+  {% if destinations %}
+  <div class="bg-white border border-slate-200 rounded-lg p-4 mb-4">
+    <h2 class="text-sm font-semibold text-slate-700 mb-3">A/B Variant Performance</h2>
+    <div class="h-48"><canvas id="variantChart"></canvas></div>
+  </div>
+  {% endif %}
+
+  {% if by_referer %}
+  <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="px-4 py-2 border-b border-slate-200 bg-slate-50 text-sm font-medium text-slate-700">
+      Top Referers
+    </div>
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-slate-600 text-xs">
+        <tr>
+          <th class="px-4 py-2 font-medium">Referer</th>
+          <th class="px-4 py-2 font-medium text-right">Clicks</th>
+          <th class="px-4 py-2 font-medium text-right">%</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for r in by_referer %}
+        <tr class="hover:bg-slate-50">
+          <td class="px-4 py-2 mono text-xs text-slate-700 truncate max-w-md">{{ r.label or '(empty / direct)' }}</td>
+          <td class="px-4 py-2 text-right text-slate-800 font-medium">{{ r.count }}</td>
+          <td class="px-4 py-2 text-right text-slate-500">{{ '%.1f' | format(r.count * 100.0 / total) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+
+{% else %}
+  <!-- Raw Clicks tab -->
+  <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+    <div class="px-4 py-2 border-b border-slate-200 bg-slate-50 text-sm font-medium text-slate-700">
+      Recent Click Events
+    </div>
+    {% if clicks %}
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-slate-600 text-xs">
+        <tr>
+          <th class="px-4 py-2 font-medium">When</th>
+          <th class="px-4 py-2 font-medium">Source</th>
+          <th class="px-4 py-2 font-medium">Device</th>
+          <th class="px-4 py-2 font-medium">Browser / OS</th>
+          <th class="px-4 py-2 font-medium">Variant Served</th>
+          <th class="px-4 py-2 font-medium">Referer</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for c in clicks %}
+        <tr class="hover:bg-slate-50">
+          <td class="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">{{ c.timestamp }}</td>
+          <td class="px-4 py-2">
+            <span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 mono">{{ c.source_label or '—' }}</span>
+          </td>
+          <td class="px-4 py-2 text-slate-600 text-xs">{{ c.device_type }}</td>
+          <td class="px-4 py-2 text-slate-600 text-xs">{{ c.browser }} / {{ c.os }}</td>
+          <td class="px-4 py-2 text-slate-600 text-xs mono truncate max-w-xs">{{ c.variant_served }}</td>
+          <td class="px-4 py-2 text-slate-500 text-xs mono truncate max-w-xs">
+            {% if c.referer_header %}{{ c.referer_header }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-4 py-8 text-center text-slate-500 text-sm">
+      No clicks in this range.
+    </div>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if active_tab == 'charts' and total > 0 %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+const CHART_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
+  '#14b8a6', '#a855f7',
+];
+
+const FILL_DAY_GAPS = (daily) => {
+  const map = new Map(daily.map(d => [d.day, d.count]));
+  if (daily.length === 0) return { labels: [], data: [] };
+  const first = new Date(daily[0].day);
+  const last = new Date(daily[daily.length - 1].day);
+  const labels = [], data = [];
+  for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    labels.push(key);
+    data.push(map.get(key) || 0);
+  }
+  return { labels, data };
+};
+
+const time = FILL_DAY_GAPS({{ daily | tojson }});
+new Chart(document.getElementById('timeChart'), {
+  type: 'line',
+  data: {
+    labels: time.labels,
+    datasets: [{
+      label: 'Clicks',
+      data: time.data,
+      borderColor: '#3b82f6',
+      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      fill: true,
+      tension: 0.3,
+      pointRadius: 3,
+    }],
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+  },
+});
+
+const buildPie = (id, data) => {
+  if (!data || data.length === 0) return;
+  new Chart(document.getElementById(id), {
+    type: 'doughnut',
+    data: {
+      labels: data.map(d => d.label || '(empty)'),
+      datasets: [{
+        data: data.map(d => d.count),
+        backgroundColor: CHART_COLORS,
+        borderWidth: 2,
+        borderColor: '#fff',
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'right', labels: { font: { size: 11 } } } },
+    },
+  });
+};
+
+const buildBar = (id, data, horizontal = true) => {
+  if (!data || data.length === 0) return;
+  new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: {
+      labels: data.map(d => d.label || '(empty)'),
+      datasets: [{
+        data: data.map(d => d.count),
+        backgroundColor: CHART_COLORS,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      indexAxis: horizontal ? 'y' : 'x',
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 } } },
+    },
+  });
+};
+
+buildPie('sourceChart', {{ by_source | tojson }});
+buildPie('deviceChart', {{ by_device | tojson }});
+buildBar('browserChart', {{ by_browser | tojson }});
+buildBar('osChart', {{ by_os | tojson }});
+
+{% if destinations %}
+const variantData = {{ by_variant | tojson }};
+if (variantData.length > 0) {
+  new Chart(document.getElementById('variantChart'), {
+    type: 'bar',
+    data: {
+      labels: variantData.map(d => {
+        const u = new URL(d.label);
+        return u.searchParams.get('v') || u.pathname.split('/').pop() || d.label.slice(0, 40);
+      }),
+      datasets: [{
+        data: variantData.map(d => d.count),
+        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444'],
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { title: (items) => variantData[items[0].dataIndex].label },
+        },
+      },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+    },
+  });
+}
+{% endif %}
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block title %}{% if link %}Edit{% else %}New{% endif %} Link — ShortLink{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold text-slate-800 mb-4">
+  {% if link %}Edit Link{% else %}New Link{% endif %}
+</h1>
+
+<form method="POST" class="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+  <div>
+    <label class="block text-sm font-medium text-slate-700 mb-1">Title (for your reference)</label>
+    <input name="title" value="{{ form.title or '' }}" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm" placeholder="e.g. Product X — New Year Campaign">
+  </div>
+
+  <div>
+    <label class="block text-sm font-medium text-slate-700 mb-1">Short Code <span class="text-slate-400 font-normal">(leave empty for random)</span></label>
+    <input name="short_code" value="{{ form.short_code or '' }}" pattern="[a-z0-9\-]+" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm mono" placeholder="e.g. ny2026">
+  </div>
+
+  <div>
+    <label class="block text-sm font-medium text-slate-700 mb-1">Default Destination URL <span class="text-red-500">*</span></label>
+    <input name="default_destination" value="{{ form.default_destination or '' }}" required class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm" placeholder="https://store.com/product-x">
+  </div>
+
+  <div>
+    <label class="block text-sm font-medium text-slate-700 mb-1">Strategy</label>
+    <select name="strategy" id="strategy" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+      <option value="utm" {% if form.strategy == 'utm' %}selected{% endif %}>UTM (manual)</option>
+      <option value="simple" {% if form.strategy == 'simple' %}selected{% endif %}>Simple (pick source)</option>
+      <option value="query_param" {% if form.strategy == 'query_param' %}selected{% endif %}>Custom query param</option>
+      <option value="direct" {% if form.strategy == 'direct' %}selected{% endif %}>Direct (no params)</option>
+    </select>
+  </div>
+
+  <!-- Simple mode: pick a preset source -->
+  <div id="simple-fields" class="border border-slate-200 rounded-md p-3 bg-blue-50/40 space-y-2" style="display:none">
+    <div class="text-xs text-slate-600 mb-1">Pick where you're sharing this link:</div>
+    <select name="source_preset" id="source-preset" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm">
+      <option value="">— Select source —</option>
+      <optgroup label="📱 Social Media">
+        <option value="facebook">Facebook</option>
+        <option value="instagram">Instagram</option>
+        <option value="twitter">X (Twitter)</option>
+        <option value="tiktok">TikTok</option>
+        <option value="pinterest">Pinterest</option>
+        <option value="youtube">YouTube</option>
+        <option value="linkedin">LinkedIn</option>
+        <option value="reddit">Reddit</option>
+        <option value="threads">Threads</option>
+        <option value="snapchat">Snapchat</option>
+      </optgroup>
+      <optgroup label="💬 Messaging">
+        <option value="telegram">Telegram</option>
+        <option value="whatsapp">WhatsApp</option>
+      </optgroup>
+      <optgroup label="🔍 Search">
+        <option value="google">Google</option>
+        <option value="bing">Bing</option>
+        <option value="duckduckgo">DuckDuckGo</option>
+      </optgroup>
+      <optgroup label="📧 Email">
+        <option value="email">Email / Newsletter</option>
+      </optgroup>
+      <optgroup label="📎 Other">
+        <option value="qr">QR Code</option>
+        <option value="direct">Direct (no tracking)</option>
+        <option value="custom">Custom (edit UTM manually)</option>
+      </optgroup>
+    </select>
+    <div id="simple-preview" class="text-xs text-slate-600 bg-white border border-slate-200 rounded px-2 py-1.5 mono hidden"></div>
+  </div>
+
+  <div id="utm-fields" class="border border-slate-200 rounded-md p-3 bg-slate-50 space-y-2">
+    <div class="text-xs text-slate-500 mb-1">UTM defaults (used if inbound URL has no UTM):</div>
+    <div class="grid grid-cols-2 gap-2">
+      <input name="utm_source" id="utm_source" value="{{ form.utm_source or '' }}" class="px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="utm_source (e.g. facebook)">
+      <input name="utm_medium" id="utm_medium" value="{{ form.utm_medium or '' }}" class="px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="utm_medium (e.g. social)">
+      <input name="utm_campaign" id="utm_campaign" value="{{ form.utm_campaign or '' }}" class="px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="utm_campaign (e.g. jan-launch)">
+      <input name="utm_content" id="utm_content" value="{{ form.utm_content or '' }}" class="px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="utm_content (e.g. red-shoe)">
+    </div>
+  </div>
+
+  <div id="qp-fields" class="border border-slate-200 rounded-md p-3 bg-slate-50 space-y-2" style="display:none">
+    <div class="text-xs text-slate-500 mb-1">Query param to append:</div>
+    <div class="grid grid-cols-2 gap-2">
+      <input name="query_param_key" value="{{ form.query_param_key or '' }}" class="px-2 py-1.5 border border-slate-300 rounded text-sm mono" placeholder="key (e.g. ref)">
+      <input name="query_param_value" value="{{ form.query_param_value or '' }}" class="px-2 py-1.5 border border-slate-300 rounded text-sm" placeholder="value (e.g. fb)">
+    </div>
+  </div>
+
+  <div>
+    <label class="block text-sm font-medium text-slate-700 mb-1">
+      A/B Variants <span class="text-slate-400 font-normal">(optional)</span>
+    </label>
+    <div id="variants-container" class="space-y-2 mb-2"></div>
+    <div class="flex items-center gap-3">
+      <button type="button" onclick="addVariant()" class="text-blue-600 hover:text-blue-700 text-sm">+ Add variant</button>
+      <span class="text-xs text-slate-500">
+        Total weight: <span id="total-weight" class="font-semibold text-slate-700">0</span>
+      </span>
+    </div>
+    <div class="text-xs text-slate-500 mt-1">
+      Kosongkan semua baris untuk pakai default destination saja.
+    </div>
+    <input type="hidden" name="destinations" id="destinations-json" value="">
+  </div>
+
+  <div class="grid grid-cols-2 gap-3">
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1">Expires At <span class="text-slate-400 font-normal">(optional)</span></label>
+      <input name="expires_at" value="{{ form.expires_at or '' }}" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm" placeholder="2026-12-31T23:59">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-slate-700 mb-1">Max Clicks <span class="text-slate-400 font-normal">(optional)</span></label>
+      <input name="max_clicks" value="{{ form.max_clicks or '' }}" type="number" min="1" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm" placeholder="e.g. 1000">
+    </div>
+  </div>
+
+  {% if link %}
+  <div class="flex items-center">
+    <input type="checkbox" name="is_active" id="is_active" value="1" {% if form.is_active %}checked{% endif %} class="mr-2">
+    <label for="is_active" class="text-sm text-slate-700">Active</label>
+  </div>
+  {% endif %}
+
+  <div class="flex items-center gap-3 pt-2">
+    <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 text-sm font-medium">
+      {% if link %}Update Link{% else %}Create Link{% endif %}
+    </button>
+    <a href="{{ url_for('index') }}" class="text-slate-600 hover:underline text-sm">Cancel</a>
+  </div>
+</form>
+
+<script>
+  const strategy = document.getElementById('strategy');
+  const utmFields = document.getElementById('utm-fields');
+  const qpFields = document.getElementById('qp-fields');
+  const simpleFields = document.getElementById('simple-fields');
+
+  // Preset definitions: maps to standard UTM values
+  const PRESETS = {
+    facebook:   { source: 'facebook',   medium: 'social' },
+    instagram:  { source: 'instagram',  medium: 'social' },
+    twitter:    { source: 'twitter',    medium: 'social' },
+    tiktok:     { source: 'tiktok',     medium: 'social' },
+    pinterest:  { source: 'pinterest',  medium: 'social' },
+    youtube:    { source: 'youtube',    medium: 'video' },
+    linkedin:   { source: 'linkedin',   medium: 'social' },
+    reddit:     { source: 'reddit',     medium: 'social' },
+    threads:    { source: 'threads',    medium: 'social' },
+    snapchat:   { source: 'snapchat',   medium: 'social' },
+    telegram:   { source: 'telegram',   medium: 'messenger' },
+    whatsapp:   { source: 'whatsapp',   medium: 'messenger' },
+    google:     { source: 'google',     medium: 'organic' },
+    bing:       { source: 'bing',       medium: 'organic' },
+    duckduckgo: { source: 'duckduckgo', medium: 'organic' },
+    email:      { source: 'email',      medium: 'email' },
+    qr:         { source: 'qr',         medium: 'offline' },
+  };
+
+  const sourcePreset = document.getElementById('source-preset');
+  const simplePreview = document.getElementById('simple-preview');
+
+  function applyPreset() {
+    const key = sourcePreset.value;
+    if (!key || key === 'direct' || key === 'custom') {
+      simplePreview.classList.add('hidden');
+      if (key === 'custom') {
+        // Switch to manual UTM mode
+        strategy.value = 'utm';
+        syncStrategy();
+        document.getElementById('utm_source').focus();
+      }
+      if (key === 'direct') {
+        // Clear UTM fields - they won't be used
+        document.getElementById('utm_source').value = '';
+        document.getElementById('utm_medium').value = '';
+      }
+      return;
+    }
+    const p = PRESETS[key];
+    document.getElementById('utm_source').value = p.source;
+    document.getElementById('utm_medium').value = p.medium;
+    simplePreview.textContent = `?utm_source=${p.source}&utm_medium=${p.medium}`;
+    simplePreview.classList.remove('hidden');
+  }
+
+  sourcePreset.addEventListener('change', applyPreset);
+
+  function syncStrategy() {
+    const v = strategy.value;
+    utmFields.style.display = (v === 'utm' || v === 'simple') ? 'block' : 'none';
+    qpFields.style.display = v === 'query_param' ? 'block' : 'none';
+    simpleFields.style.display = v === 'simple' ? 'block' : 'none';
+  }
+  strategy.addEventListener('change', syncStrategy);
+  syncStrategy();
+
+  // On submit, if strategy is "simple" and a preset is chosen, keep strategy as "utm"
+  // so backend treats it as standard UTM. The preset values are already in the UTM fields.
+  document.querySelector('form').addEventListener('submit', function() {
+    if (strategy.value === 'simple' && sourcePreset.value && PRESETS[sourcePreset.value]) {
+      strategy.value = 'utm';
+    }
+  });
+
+  // On edit page: if form.utm_source matches a preset, pre-select it
+  {% if form.utm_source %}
+    const currentSource = '{{ form.utm_source }}';
+    const matchKey = Object.keys(PRESETS).find(k => PRESETS[k].source === currentSource);
+    if (matchKey) {
+      sourcePreset.value = matchKey;
+      applyPreset();
+    }
+  {% endif %}
+
+  // --- A/B variants dynamic rows ---
+  function addVariant(url = '', weight = '') {
+    const container = document.getElementById('variants-container');
+    const row = document.createElement('div');
+    row.className = 'variant-row flex items-center gap-2';
+    row.innerHTML = `
+      <input type="url" name="variant_url" placeholder="https://store.com/v1"
+             value="${url.replace(/"/g, '&quot;')}"
+             class="flex-1 px-3 py-2 border border-slate-300 rounded-md text-sm">
+      <div class="flex items-center gap-1">
+        <input type="number" name="variant_weight" placeholder="50" min="0"
+               value="${weight}"
+               class="w-20 px-2 py-2 border border-slate-300 rounded-md text-sm text-right">
+        <span class="text-xs text-slate-500 w-12 text-right" data-pct>0%</span>
+      </div>
+      <button type="button" onclick="removeVariant(this)"
+              class="text-slate-400 hover:text-red-600 px-2 text-xl leading-none"
+              title="Remove variant">&times;</button>
+    `;
+    container.appendChild(row);
+    row.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('input', updatePercentages);
+    });
+    updatePercentages();
+  }
+
+  function removeVariant(btn) {
+    btn.closest('.variant-row').remove();
+    updatePercentages();
+  }
+
+  function updatePercentages() {
+    const rows = document.querySelectorAll('.variant-row');
+    const weights = [...rows].map(r => parseInt(r.querySelector('input[name="variant_weight"]').value) || 0);
+    const total = weights.reduce((a, b) => a + b, 0);
+    document.getElementById('total-weight').textContent = total;
+    rows.forEach((row, i) => {
+      const pct = total > 0 ? (weights[i] / total * 100).toFixed(1) : 0;
+      row.querySelector('[data-pct]').textContent = pct + '%';
+    });
+  }
+
+  function syncDestinations() {
+    const rows = document.querySelectorAll('.variant-row');
+    const data = [...rows].map(row => {
+      const url = row.querySelector('input[name="variant_url"]').value.trim();
+      const weight = parseInt(row.querySelector('input[name="variant_weight"]').value) || 0;
+      return { url, weight };
+    }).filter(d => d.url);
+    document.getElementById('destinations-json').value = data.length > 0 ? JSON.stringify(data) : '';
+  }
+
+  document.querySelector('form').addEventListener('submit', syncDestinations);
+
+  // Pre-populate from existing data (edit mode)
+  {% if form.destinations and form.destinations is iterable and form.destinations is not string %}
+    const existing = {{ form.destinations | tojson }};
+    if (Array.isArray(existing) && existing.length > 0) {
+      existing.forEach(d => addVariant(d.url, d.weight));
+    }
+  {% endif %}
+</script>
+{% endblock %}

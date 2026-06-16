@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} — ShortLink{% endblock %}
+{% block content %}
+<div class="bg-white border border-slate-200 rounded-lg p-12 text-center">
+  <div class="text-6xl font-bold text-slate-300 mb-2">{{ code }}</div>
+  <div class="text-slate-600">{{ message }}</div>
+  <a href="{{ url_for('index') }}" class="inline-block mt-6 text-blue-600 hover:underline text-sm">← Back to links</a>
+</div>
+{% endblock %}

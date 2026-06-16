@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Links — ShortLink{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+  <h1 class="text-2xl font-bold text-slate-800">All Links</h1>
+  <a href="{{ url_for('new_link') }}" class="bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 text-sm">+ New Link</a>
+</div>
+
+<!-- Aggregate stats -->
+{% if totals %}
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+  <div class="bg-white border border-slate-200 rounded-lg p-3">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Last 24h</div>
+    <div class="text-2xl font-bold text-slate-800 mt-1">{{ totals['24h'] }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded-lg p-3">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Last 7 days</div>
+    <div class="text-2xl font-bold text-slate-800 mt-1">{{ totals['7d'] }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded-lg p-3">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">Last 30 days</div>
+    <div class="text-2xl font-bold text-slate-800 mt-1">{{ totals['30d'] }}</div>
+  </div>
+  <div class="bg-white border border-slate-200 rounded-lg p-3">
+    <div class="text-xs text-slate-500 uppercase tracking-wide">All time</div>
+    <div class="text-2xl font-bold text-slate-800 mt-1">{{ totals['all'] }}</div>
+  </div>
+</div>
+{% endif %}
+
+{% if links %}
+<div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-slate-50 text-left text-slate-600">
+        <tr>
+          <th class="px-4 py-2 font-medium">Title</th>
+          <th class="px-4 py-2 font-medium">Short Code</th>
+          <th class="px-4 py-2 font-medium">Destination</th>
+          <th class="px-4 py-2 font-medium">Strategy</th>
+          <th class="px-4 py-2 font-medium">Clicks</th>
+          <th class="px-4 py-2 font-medium">Status</th>
+          <th class="px-4 py-2 font-medium">Created</th>
+          <th class="px-4 py-2 font-medium text-right bg-slate-50 sticky right-0 z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for l in links %}
+        <tr class="hover:bg-slate-50">
+          <td class="px-4 py-2 font-medium text-slate-800">
+            {{ l.title or '—' }}
+          </td>
+          <td class="px-4 py-2 mono">
+            <div class="flex items-center gap-1">
+              <a href="/r/{{ l.short_code }}" target="_blank" class="text-blue-600 hover:underline">/r/{{ l.short_code }}</a>
+              <button type="button" onclick="copyShortLink('{{ l.short_code }}', this)" title="Copy link"
+                      class="text-slate-400 hover:text-blue-600 px-1.5 py-0.5 rounded text-xs">
+                📋
+              </button>
+            </div>
+          </td>
+          <td class="px-4 py-2 text-slate-600" style="max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ l.default_destination }}">
+            {{ l.default_destination }}
+          </td>
+          <td class="px-4 py-2 text-slate-600">{{ l.strategy }}</td>
+          <td class="px-4 py-2 text-slate-800 font-medium">{{ l.click_count }}</td>
+          <td class="px-4 py-2">
+            {% if l.is_active %}
+              <span class="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700">active</span>
+            {% else %}
+              <span class="px-2 py-0.5 text-xs rounded-full bg-slate-200 text-slate-600">disabled</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-2 text-slate-500 text-xs whitespace-nowrap">{{ l.created_at }}</td>
+          <td class="px-4 py-2 text-right bg-white sticky right-0 z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.1)]">
+            <div class="flex items-center justify-end gap-1.5 flex-wrap">
+              <a href="{{ url_for('view_stats', link_id=l.id) }}" class="text-xs text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-300 px-2 py-1 rounded whitespace-nowrap">View</a>
+              <a href="{{ url_for('edit_link', link_id=l.id) }}" class="text-xs text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-300 px-2 py-1 rounded whitespace-nowrap">Edit</a>
+              <form method="POST" action="{{ url_for('delete_link', link_id=l.id) }}" class="inline" onsubmit="return confirm('Delete this link and all its click history?');">
+                <button type="submit" class="text-xs text-white bg-red-500 hover:bg-red-600 border border-red-500 px-2 py-1 rounded whitespace-nowrap font-semibold">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div class="flex items-center justify-between mt-4 text-sm">
+  <div class="text-slate-500">
+    Showing {{ ((page - 1) * per_page) + 1 }}–{{ [page * per_page, total] | min }} of {{ total }}
+  </div>
+  <div class="flex items-center gap-1">
+    {% if page > 1 %}
+      <a href="?page={{ page - 1 }}" class="px-3 py-1.5 border border-slate-300 rounded-md text-slate-600 hover:bg-slate-50">← Prev</a>
+    {% endif %}
+    {% for p in range(1, total_pages + 1) %}
+      {% if p == page %}
+        <span class="px-3 py-1.5 bg-blue-600 text-white rounded-md font-medium">{{ p }}</span>
+      {% elif p == 1 or p == total_pages or (p >= page - 1 and p <= page + 1) %}
+        <a href="?page={{ p }}" class="px-3 py-1.5 border border-slate-300 rounded-md text-slate-600 hover:bg-slate-50">{{ p }}</a>
+      {% elif p == page - 2 or p == page + 2 %}
+        <span class="text-slate-400 px-1">…</span>
+      {% endif %}
+    {% endfor %}
+    {% if page < total_pages %}
+      <a href="?page={{ page + 1 }}" class="px-3 py-1.5 border border-slate-300 rounded-md text-slate-600 hover:bg-slate-50">Next →</a>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="bg-white border border-slate-200 rounded-lg p-8 text-center text-slate-500">
+  No links yet. <a href="{{ url_for('new_link') }}" class="text-blue-600 hover:underline">Create your first one</a>.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function copyShortLink(code, btn) {
+    const url = window.location.origin + '/r/' + code;
+    const showCopied = () => {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '✓';
+      btn.classList.add('text-green-600');
+      setTimeout(() => {
+        btn.innerHTML = orig;
+        btn.classList.remove('text-green-600');
+      }, 1200);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(showCopied).catch(() => {
+        fallback(); showCopied();
+      });
+    } else {
+      fallback(); showCopied();
+    }
+    function fallback() {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  }
+</script>
+{% endblock %}
