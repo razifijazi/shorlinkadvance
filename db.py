@@ -74,12 +74,12 @@ def get_db():
 
 def init_db():
     with get_db() as conn:
-        # Migration first: add domain_id to existing links tables
-        cols = [row["name"] for row in conn.execute("PRAGMA table_info(links)").fetchall()]
-        if "domain_id" not in cols:
-            conn.execute("ALTER TABLE links ADD COLUMN domain_id INTEGER REFERENCES domains(id) ON DELETE RESTRICT")
-        # Now run full schema (safe — IF NOT EXISTS handles everything)
+        # Run full schema first (IF NOT EXISTS handles fresh + existing DBs)
         conn.executescript(SCHEMA)
+        # Migration: add domain_id to existing links tables that pre-date multi-domain
+        cols = [row["name"] for row in conn.execute("PRAGMA table_info(links)").fetchall()]
+        if cols and "domain_id" not in cols:
+            conn.execute("ALTER TABLE links ADD COLUMN domain_id INTEGER REFERENCES domains(id) ON DELETE RESTRICT")
         # Indexes (created after migration so domain_id column is guaranteed)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_links_domain ON links(domain_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_domains_hostname ON domains(hostname)")
